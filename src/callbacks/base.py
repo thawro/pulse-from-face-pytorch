@@ -36,6 +36,10 @@ class BaseCallback:
     def on_epoch_end(self, trainer: Trainer):
         pass
 
+    @abstractmethod
+    def log(self, trainer: Trainer):
+        pass
+
     def state_dict(self) -> dict:
         return {}
 
@@ -71,6 +75,10 @@ class Callbacks:
     def on_epoch_end(self, trainer: Trainer):
         for callback in self.callbacks:
             callback.on_epoch_end(trainer)
+
+    def log(self, trainer: Trainer):
+        for callback in self.callbacks:
+            callback.log(trainer)
 
     @abstractmethod
     def state_dict(self):

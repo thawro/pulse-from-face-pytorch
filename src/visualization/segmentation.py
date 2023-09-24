@@ -3,36 +3,34 @@
 import cv2
 import matplotlib.pyplot as plt
 import numpy as np
-from geda.utils.colors import color_map, color_map_viz
 from typing import Callable
 from src.metrics.results import SegmentationResult
 
-COLORMAP = color_map(256)
-
 
 def plot_segmentation_results(
-    results: list[SegmentationResult],
-    labels: list[str],
+    results: SegmentationResult,
+    cmap: list[tuple[int, int, int]],
     inverse_preprocessing: Callable,
     filepath: str | None,
 ) -> None:
     """Plot image, y_true and y_pred (masks) for each result."""
-    nrows = len(results)
-    fig, axes = plt.subplots(nrows + 1, 3, figsize=(20, 7 * nrows))
 
-    color_map_viz(labels, background=0, void=255, ax=axes[0][0])
+    images = inverse_preprocessing(results.images)
+    nrows = len(images)
+    fig, axes = plt.subplots(nrows, 3, figsize=(20, 7 * nrows))
 
-    for i, result in enumerate(results):
-        ax = axes[i + 1]
-        image, y_pred, y_true = result.image, result.y_pred, result.y_true
-        image = inverse_preprocessing(image)
+    for i in range(nrows):
+        ax = axes[i]
 
-        y_pred = y_pred.argmax(0)
-        y_true = colorize_2d_segmentation_mask(y_true)
-        y_pred = colorize_2d_segmentation_mask(y_pred)
+        pred = results.preds[i].argmax(0)
+        target = results.targets[i]
+        image = images[i]
+
+        target = colorize_mask(target, cmap=cmap)
+        pred = colorize_mask(pred, cmap=cmap)
         ax[0].imshow(image)
-        ax[1].imshow(y_true)
-        ax[2].imshow(y_pred)
+        ax[1].imshow(target)
+        ax[2].imshow(pred)
         for _ax in ax:
             _ax.set_axis_off()
 
@@ -56,12 +54,10 @@ def plot_mask_on_image(image: np.ndarray, mask: np.ndarray, txt: str | None = No
     return image
 
 
-def colorize_2d_segmentation_mask(mask: np.ndarray, colormap: np.ndarray = COLORMAP):
-    """parse 2d segmentation mask (grayscale) to RGB mask."""
-    mask = np.expand_dims(mask, axis=-1)
-    cmap = colormap[:, np.newaxis, :]
-    new_mask = np.dot(mask == 0, cmap[0])
-    unique_labels = np.unique(mask)
-    for label_id in unique_labels:
-        new_mask += np.dot(mask == label_id, cmap[label_id])
-    return new_mask
+def colorize_mask(mask: np.ndarray, cmap: list[tuple[int, int, int]]) -> np.ndarray:
+    colormap = [np.array(c, dtype=np.float32) for c in cmap]
+    mask_shape = mask.shape
+    new_mask = np.zeros((*mask_shape, 3))
+    for i, c in enumerate(colormap):
+        new_mask[mask == i] = c
+    return new_mask.astype(np.uint8)

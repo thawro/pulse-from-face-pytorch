@@ -35,7 +35,12 @@ class MetricsStorage:
         for metric, value in metrics.items():
             if isinstance(value, torch.Tensor):
                 value = value.item()
-            self.metrics[metric][split].append(value)
+            if metric not in self.metrics:
+                # TODO: may happen that some new metric was added after training resume
+                # and the epochs count wont be equal for the new metric
+                self.metrics[metric] = {split: [value]}
+            else:
+                self.metrics[metric][split].append(value)
 
     def to_dict(self) -> dict:
         """For state saving"""

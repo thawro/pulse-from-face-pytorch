@@ -54,6 +54,7 @@ class BaseLogger:
         self.model_dir = self.log_path / "model"
         self.model_dir.mkdir(parents=True, exist_ok=True)
         self.results = LoggerResults(config=config)
+        self.log_config()
 
     def log_hyperparams(self, params: dict) -> None:
         """Log hyperparameters as params."""

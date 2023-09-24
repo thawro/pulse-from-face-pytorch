@@ -5,12 +5,12 @@ import numpy as np
 @dataclass
 class Result:
     data: np.ndarray
-    y_true: np.ndarray
-    y_pred: np.ndarray
+    targets: np.ndarray
+    preds: np.ndarray
 
 
 @dataclass
 class SegmentationResult:
-    image: np.ndarray
-    y_true: np.ndarray
-    y_pred: np.ndarray
+    images: np.ndarray
+    targets: np.ndarray
+    preds: np.ndarray

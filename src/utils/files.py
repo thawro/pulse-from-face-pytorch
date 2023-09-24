@@ -1,8 +1,8 @@
 """Utility functions for file operations"""
 
 from pathlib import Path
-
 import yaml
+import zipfile
 
 
 def read_text_file(filename: str) -> list[str]:
@@ -29,3 +29,8 @@ def save_yaml(dct: dict, path: Path | str) -> None:
 def save_txt_to_file(txt: str, filename: str):
     with open(filename, "w") as file:
         file.write(txt)
+
+
+def unzip_zip(file_path, dst_path):
+    with zipfile.ZipFile(file_path, "r") as zip_ref:
+        zip_ref.extractall(dst_path)

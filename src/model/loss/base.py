@@ -13,16 +13,3 @@ class WeightedLoss(_Loss):
     def forward(self, pred: Tensor, target: Tensor) -> Tensor:
         loss = self.criterion(pred, target)
         return self.weight * loss
-
-
-class BaseLoss(_Loss):
-    def __init__(
-        self,
-        loss_fn: WeightedLoss,
-    ):
-        super().__init__()
-        self.loss_fn = loss_fn
-
-    def calculate_loss(self, pred: Tensor, target: Tensor) -> Tensor | tuple[Tensor, ...]:
-        loss = self.loss_fn(pred, target)
-        return loss

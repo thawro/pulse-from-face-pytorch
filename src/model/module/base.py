@@ -8,8 +8,8 @@ from src.logging import get_pylogger
 from src.logging.loggers import BaseLogger
 from src.metrics import MetricsStorage, Result
 from src.model.model import BaseModel
-from src.model.loss import BaseLoss
-from src.model.metrics import BaseMetrics
+from torch.nn.modules.loss import _Loss
+from src.model.metrics.base import BaseMetrics
 
 from src.callbacks import Callbacks
 
@@ -24,11 +24,14 @@ class BaseModule:
     datamodule: DataModule
     callbacks: "Callbacks"
     current_epoch: int
+    current_step: int
+    log_every_n_steps: int
+    limit_batches: int
 
     def __init__(
         self,
         model: BaseModel,
-        loss_fn: BaseLoss,
+        loss_fn: _Loss,
         metrics: BaseMetrics,
         optimizers: dict[str, torch.optim.Optimizer],
         schedulers: dict[str, torch.optim.lr_scheduler.LRScheduler] = {},
@@ -41,7 +44,7 @@ class BaseModule:
         self.metrics = metrics
         self.steps_metrics_storage = MetricsStorage()
         self.epochs_metrics_storage = MetricsStorage()
-        self.results: dict[str, list[Result]] = {split: [] for split in SPLITS}
+        self.results: dict[str, Result] = {}
 
     def pass_attributes(
         self,
@@ -49,11 +52,18 @@ class BaseModule:
         logger: BaseLogger,
         callbacks: "Callbacks",
         datamodule: DataModule,
+        limit_batches: int,
+        log_every_n_steps: int,
     ):
         self.logger = logger
         self.callbacks = callbacks
         self.datamodule = datamodule
+        self.limit_batches = limit_batches
+        self.total_batches = datamodule.total_batches
+        if limit_batches > 0:
+            self.total_batches = {k: limit_batches for k in self.total_batches}
         self.device = device
+        self.log_every_n_steps = log_every_n_steps
 
     def set_attributes(self, **attributes):
         for name, attr in attributes.items():
@@ -89,40 +99,43 @@ class BaseModule:
         )
         return model_state
 
-    def _common_step(self, batch: tuple[Tensor, Tensor, Tensor], batch_idx: int, stage: str):
-        data, y_true = batch
-        y_pred = self.model(data)
-        loss = self.loss_fn(y_pred, y_true)
+    def _common_step(
+        self, batch: tuple[Tensor, Tensor], batch_idx: int, stage: str, update_metrics: bool
+    ):
         if stage == "train":
-            self.optimizers["optim_0"].zero_grad()
+            self.optimizers["optim"].zero_grad()
+
+        data, targets = batch
+        preds = self.model(data)
+        loss = self.loss_fn(preds, targets)
+
+        if stage == "train":
             loss.backward()
-            self.optimizers["optim_0"].step()
-        losses = {
-            "loss": loss,
-        }
-        metrics = self.metrics.calculate_metrics(y_pred=y_pred, y_true=y_true)
-        self.steps_metrics_storage.append(losses, stage)
-        self.steps_metrics_storage.append(metrics, stage)
-        results = {"data": data, "y_true": y_true, "y_pred": y_pred}
-        if batch_idx == 0:
-            num_examples = min(10, len(results["image"]))
-            for name, tensor in results.items():
-                results[name] = tensor[:num_examples].cpu().detach().numpy()
+            self.optimizers["optim"].step()
 
-            for i in range(num_examples):
-                result = Result(
-                    data=results["data"][i],
-                    y_true=results["y_true"][i],
-                    y_pred=results["y_pred"][i],
-                )
-                self.results[stage].append(result)
+        if update_metrics:
+            losses = {"loss": loss.item()}
+            metrics = self.metrics.calculate_metrics(preds, targets)
 
-    def training_step(self, batch: tuple[Tensor, Tensor, Tensor], batch_idx: int):
-        self._common_step(batch, batch_idx, "train")
+            self.steps_metrics_storage.append(losses, stage)
+            self.steps_metrics_storage.append(metrics, stage)
 
-    def validation_step(self, batch: tuple[Tensor, Tensor, Tensor], batch_idx: int):
-        with torch.no_grad():
-            self._common_step(batch, batch_idx, "val")
+        if self.current_step % self.log_every_n_steps == 0 and batch_idx == 0:
+            self.results[stage] = Result(
+                data=data.detach().cpu().numpy(),
+                preds=preds.detach().cpu().numpy(),
+                targets=targets.cpu().numpy(),
+            )
+
+    def training_step(
+        self, batch: tuple[Tensor, Tensor], batch_idx: int, update_metrics: bool = True
+    ):
+        self._common_step(batch, batch_idx, "train", update_metrics)
+        for name, scheduler in self.schedulers.items():
+            scheduler.step()
+
+    def validation_step(self, batch: tuple[Tensor, Tensor], batch_idx: int, update_metrics: bool):
+        self._common_step(batch, batch_idx, "val", update_metrics)
 
     @abstractmethod
     def on_train_epoch_start(self):

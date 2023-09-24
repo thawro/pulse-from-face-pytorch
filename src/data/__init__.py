@@ -1,2 +1,2 @@
 from src.data.datamodule import DataModule
-from src.data.dataset import BaseDataset
+from src.data.dataset import CelebAMaskDataset

@@ -33,6 +33,12 @@ class DataModule:
         self.pin_memory = pin_memory
         self.drop_last = drop_last
         self._shuffle = None
+        self.total_batches = {
+            "train": len(self.train_dataloader()),
+            "val": len(self.val_dataloader()),
+        }
+        if test_ds is not None:
+            self.total_batches["test"] = len(self.test_dataloader())
 
     def _set_shuffle(self, shuffle: bool):
         self._shuffle = shuffle
