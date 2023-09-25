@@ -36,9 +36,11 @@ def record_webcam_to_mp4(filename: str = "video.mp4"):
 
 def process_video(
     processing_fn: Callable[[np.ndarray], dict[str, Any]],
+    frames_bufor,
     filename: str | int = "video.mp4",
     start_frame: int = 0,
     end_frame: int = -1,
+    verbose: bool = False,
 ) -> dict[str, list[Any]]:
     cap = cv2.VideoCapture(filename)
     if end_frame == -1:
@@ -50,13 +52,14 @@ def process_video(
         count += 1
         ret, frame = cap.read()
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        print(count)
+        if verbose:
+            print(count)
         if count < start_frame:
             continue
         if count == end_frame:
             break
         if ret:
-            result = processing_fn(frame=frame_rgb)
+            result, frames_bufor = processing_fn(frame=frame_rgb, frames_bufor=frames_bufor)
             for name, out in result.items():
                 results[name].append(out)
             if cv2.waitKey(1) == 27:

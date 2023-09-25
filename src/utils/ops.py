@@ -1,5 +1,7 @@
 import numpy as np
 import cv2
+import torch
+import math
 
 
 def keep_largest_blob(mask: np.ndarray):
@@ -16,3 +18,18 @@ def keep_largest_blob(mask: np.ndarray):
     cv2.drawContours(out_mask, [largest_contour], -1, 1, cv2.FILLED)
     out_mask = cv2.bitwise_and(mask.astype(np.uint8), out_mask).astype(np.float32)
     return out_mask
+
+
+def gaussian_kernel_2d(kernel_size: int, sigma: float, device: str = "cuda"):
+    x_cord = torch.arange(kernel_size)
+    x_grid = x_cord.repeat(kernel_size).view(kernel_size, kernel_size)
+    y_grid = x_grid.t()
+    xy_grid = torch.stack([x_grid, y_grid], dim=-1)
+
+    mean = (kernel_size - 1) / 2.0
+    var = sigma**2.0
+
+    kernel = (1 / (2 * math.pi * var)) * torch.exp(
+        -torch.sum((xy_grid - mean) ** 2.0, dim=-1) / (2 * var)
+    )
+    return (kernel / torch.sum(kernel)).to(device).repeat(1, 1, 1, 1)

@@ -5,10 +5,10 @@ from src.data.transforms import CelebATransform
 import numpy as np
 import torch
 from src.visualization.segmentation import colorize_mask
-from src.utils.ops import keep_largest_blob
+from src.utils.ops import keep_largest_blob, gaussian_kernel_2d
 import cv2
 from scipy import signal
-
+import torch.nn.functional as F
 from src.bin.celebA.config import (
     IMGSZ,
     MEAN,
@@ -82,30 +82,41 @@ def plot_timeseries(arr):
 class POSExtractor(torch.nn.Module):
     def __init__(self, fps: float):
         super().__init__()
-        self.fs = fps
-        self.win_sec = 1.6
+        win_len_sec = 1.6
+        win_len = int(win_len_sec * fps)
+        self.s_proj = torch.nn.Linear(3, 2)
+        with torch.no_grad():
+            M = torch.tensor([[0, 1, -1], [-2, 1, 1]], dtype=torch.float).to(DEVICE)
+            self.s_proj.weight = torch.nn.Parameter(M)
 
-    def forward(self, x):
-        batch_size, N, num_features = x.shape
-        H = torch.zeros(batch_size, 1, N).to("cuda")
+        self.win_len = win_len
 
-        for b in range(batch_size):
-            RGB = x[b]  # Assume RGB preprocessing already done
-            N = RGB.shape[0]
-            l = int(self.fs * self.win_sec)  # math.ceil(WinSec * fs)
+    def forward(self, rgbs):
+        B, N, C = rgbs.shape
+        all_rgbs = []
+        for _rgb in rgbs:
+            _rgb = _rgb.unfold(dimension=0, size=self.win_len, step=1)
+            _rgb = _rgb.permute(0, 2, 1)
+            all_rgbs.append(_rgb)
+        all_rgbs = torch.stack(all_rgbs)
+        rgb = all_rgbs.flatten(0, 1)
+        fold_B, _, C = rgb.shape
+        H = torch.zeros(B, N).to(DEVICE)
+        Cn = rgb / rgb.mean(dim=1, keepdim=True)
 
-            for n in range(N):
-                m = n - l
-                if m >= 0:
-                    Cn = RGB[m:n, :] / torch.mean(RGB[m:n, :], dim=0)
-                    Cn = torch.transpose(Cn, 0, 1)
-                    S = torch.matmul(
-                        torch.tensor([[0, 1, -1], [-2, 1, 1]], dtype=torch.float).to("cuda"), Cn
-                    )
-                    h = S[0, :] + (torch.std(S[0, :]) / torch.std(S[1, :])) * S[1, :]
-                    mean_h = torch.mean(h)
-                    h = h - mean_h
-                    H[b, 0, m:n] = H[b, 0, m:n] + h
+        S = self.s_proj(Cn.flatten(0, 1)).reshape(fold_B, self.win_len, 2).permute(0, 2, 1)
+
+        std_0 = S[:, 0].std(1)
+        std_1 = S[:, 1].std(1)
+
+        h = S[:, 0] + (std_0 / std_1).unsqueeze(1) * S[:, 1]
+        h = h - h.mean(1, keepdim=True)
+        i = 0
+        for b in range(B):
+            for m in range(0, N - self.win_len):
+                n = m + self.win_len
+                H[b, m:n] += h[i]
+                i += 1
         return H
 
 
@@ -148,15 +159,20 @@ def extract_rgb_from_forehead(frame: np.ndarray, model: SegmentationModel):
     return {"rgb": rgb}
 
 
-def extract_rgb_from_skin(frame: np.ndarray, model: SegmentationModel):
+def extract_rgb_from_skin(frame: np.ndarray, model: SegmentationModel, frames_bufor: torch.Tensor):
+    frame = torch.from_numpy(frame).permute(2, 0, 1).unsqueeze(0).float()
+    frame = torch.nn.functional.avg_pool2d(frame, (4, 4))
+    frame = frame.squeeze().permute(1, 2, 0).numpy()  # .astype(np.uint8)
     frame_h, frame_w = frame.shape[:2]
-    mask, _frame, resize_size, crop_coords = predict(frame, model, ["skin"])
+
+    _mask, _frame, resize_size, crop_coords = predict(frame, model, ["skin"])
     xmin, ymin, xmax, ymax = crop_coords
     resize_w, resize_h = resize_size
 
     mask_before_crop = np.zeros((resize_h, resize_w))
 
-    mask = keep_largest_blob(mask)
+    mask = keep_largest_blob(_mask)
+    _mask = cv2.normalize(_mask, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
     mask = cv2.erode(mask, kernel=np.ones((5, 5), np.uint8), iterations=4)
 
     mask_before_crop[ymin:ymax, xmin:xmax] = mask
@@ -166,14 +182,39 @@ def extract_rgb_from_skin(frame: np.ndarray, model: SegmentationModel):
 
     rgb = frame[bool_mask].mean(0)  # H x W x 3 -> 3
 
-    mask = (mask * 255).astype(np.uint8)
-    mask = cv2.cvtColor(mask, cv2.COLOR_GRAY2RGB)
-    frame_with_mask = cv2.addWeighted(frame, 1, mask, 0.3, 1)
+    frames_bufor = frames_bufor.roll(shifts=-1, dims=2)
 
-    cv2.imshow("Raw frame", cv2.cvtColor(frame_with_mask, cv2.COLOR_RGB2BGR))
+    frame_g = frame[..., 1]
+    ksize = 27
+    kernel = gaussian_kernel_2d(ksize, 3)
+    padding = (ksize - 1) // 2
+    frame_g = torch.from_numpy(frame_g).to(DEVICE).unsqueeze(0).unsqueeze(0)
+    frame_g = F.conv2d(frame_g, kernel, groups=1, padding=padding)
+    frame_g = frame_g.squeeze().cpu().numpy()
+    frames_bufor[..., -1] = torch.from_numpy(frame_g)
+
+    skin_frames_bufor = frames_bufor[bool_mask].to(DEVICE)
+
+    _min = torch.min(skin_frames_bufor, dim=-1, keepdim=True).values
+    _max = torch.max(skin_frames_bufor, dim=-1, keepdim=True).values
+
+    skin_frames_bufor = (skin_frames_bufor - _min) / (_max - _min)
+    last_frame = skin_frames_bufor[:, -1].detach().cpu().numpy()
+    last_frame = (last_frame * 255).astype(np.uint8)
+
+    last_frame = cv2.applyColorMap(last_frame, cv2.COLORMAP_JET).squeeze()
+    pulse_mask = np.zeros((*bool_mask.shape, 3))
+
+    pulse_mask[bool_mask] = last_frame.squeeze()
+
+    face_pulse = cv2.addWeighted(frame.astype(np.uint8), 1, pulse_mask.astype(np.uint8), 0.5, 1)
+
+    cv2.imshow("Raw frame", cv2.cvtColor(frame.astype(np.uint8), cv2.COLOR_RGB2BGR))
     cv2.imshow("Model input", cv2.cvtColor(_frame, cv2.COLOR_RGB2BGR))
+    cv2.imshow("Model output", cv2.cvtColor(_mask, cv2.COLOR_GRAY2BGR))
+    cv2.imshow("Face pulse", cv2.cvtColor(face_pulse, cv2.COLOR_RGB2BGR))
 
-    return {"rgb": rgb, "frame_mask": frame_with_mask}
+    return {"rgb": rgb, "face_pulse": face_pulse}, frames_bufor
 
 
 def get_signal_frequencies(signal: np.ndarray, fs: float):
@@ -189,7 +230,7 @@ def plot_signals(
     rgb: np.ndarray, pos: np.ndarray, freqs: np.ndarray, pos_fft: np.ndarray, fps: float
 ):
     duration = len(rgb) / fps
-    t = np.arange(0, duration, 1 / fps)
+    t = np.linspace(0, duration, len(rgb))
     fig, axes = plt.subplots(3, 1, figsize=(14, 15))
     colors = ["r", "g", "b"]
     for i, sig in enumerate(rgb.T):
@@ -215,11 +256,14 @@ def main():
     # record_webcam_to_mp4(filename)
     # exit()
     model = load_model()
+    BUFOR = torch.zeros(1280 // 4, 720 // 4, 90) + 0.5
     processing_fn = partial(extract_rgb_from_skin, model=model)
     # processing_fn = partial(extract_rgb_from_forehead, model=model)
 
     # filename = 0  # webcam
-    result = process_video(processing_fn, filename=filename, start_frame=0, end_frame=-1)
+    result = process_video(
+        processing_fn, filename=filename, start_frame=0, end_frame=-1, frames_bufor=BUFOR
+    )
     rgb = np.stack(result["rgb"])
     frames = result["frame_mask"]
     save_frames_to_video(frames, 30, "temp/frames_mask.mp4")
@@ -230,7 +274,7 @@ def main():
     pos_extractor = POSExtractor(fps).to(DEVICE)
 
     rgb_input = torch.from_numpy(rgb).unsqueeze(0).to(DEVICE).float()
-    pos = pos_extractor(rgb_input).squeeze().cpu().numpy()
+    pos = pos_extractor(rgb_input).squeeze().detach().cpu().numpy()
 
     b, a = signal.butter(1, [0.75 / fps * 2, 3 / fps * 2], btype="bandpass")
     pos = signal.filtfilt(b, a, pos.astype(np.double))

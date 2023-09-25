@@ -165,3 +165,4 @@ CelebAMask-HQ.zip
 notebooks/
 *.MOV
 *.mp4
+temp/*
