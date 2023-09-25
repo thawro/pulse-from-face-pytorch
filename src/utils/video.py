@@ -5,7 +5,7 @@ from typing import Callable, Any
 from collections import defaultdict
 
 
-def save_frames_as_mp4(frames: list[np.ndarray], fps: int, filepath: str):
+def save_frames_to_video(frames: list[np.ndarray], fps: int, filepath: str):
     clip = ImageSequenceClip(frames, fps=fps)
     clip.write_videofile(filepath, fps=fps)
 
@@ -49,13 +49,14 @@ def process_video(
     while True:
         count += 1
         ret, frame = cap.read()
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         print(count)
         if count < start_frame:
             continue
         if count == end_frame:
             break
         if ret:
-            result = processing_fn(frame=frame)
+            result = processing_fn(frame=frame_rgb)
             for name, out in result.items():
                 results[name].append(out)
             if cv2.waitKey(1) == 27:

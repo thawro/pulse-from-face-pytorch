@@ -21,7 +21,7 @@ from src.bin.celebA.config import (
 )
 from src.utils.utils import find_center_of_mass
 import time
-from src.utils.video import record_webcam_to_mp4, process_video
+from src.utils.video import record_webcam_to_mp4, process_video, save_frames_to_video
 from functools import partial
 import matplotlib.pyplot as plt
 
@@ -150,7 +150,6 @@ def extract_rgb_from_forehead(frame: np.ndarray, model: SegmentationModel):
 
 def extract_rgb_from_skin(frame: np.ndarray, model: SegmentationModel):
     frame_h, frame_w = frame.shape[:2]
-
     mask, _frame, resize_size, crop_coords = predict(frame, model, ["skin"])
     xmin, ymin, xmax, ymax = crop_coords
     resize_w, resize_h = resize_size
@@ -171,11 +170,42 @@ def extract_rgb_from_skin(frame: np.ndarray, model: SegmentationModel):
     mask = cv2.cvtColor(mask, cv2.COLOR_GRAY2RGB)
     frame_with_mask = cv2.addWeighted(frame, 1, mask, 0.3, 1)
 
-    cv2.imshow("Raw frame", frame_with_mask)
-    cv2.imshow("Model input", _frame)
-    # cv2.imshow("Mask", mask)
+    cv2.imshow("Raw frame", cv2.cvtColor(frame_with_mask, cv2.COLOR_RGB2BGR))
+    cv2.imshow("Model input", cv2.cvtColor(_frame, cv2.COLOR_RGB2BGR))
 
-    return {"rgb": rgb}
+    return {"rgb": rgb, "frame_mask": frame_with_mask}
+
+
+def get_signal_frequencies(signal: np.ndarray, fs: float):
+    y_fft = np.fft.fft(signal)  # Original FFT
+    y_fft = y_fft[: round(len(signal) / 2)]  # First half ( pos freqs )
+    y_fft = np.abs(y_fft)  # Absolute value of magnitudes
+    y_fft = y_fft / max(y_fft)  # Normalized so max = 1
+    freq_x_axis = np.linspace(0, fs / 2, len(y_fft))
+    return freq_x_axis, y_fft
+
+
+def plot_signals(
+    rgb: np.ndarray, pos: np.ndarray, freqs: np.ndarray, pos_fft: np.ndarray, fps: float
+):
+    duration = len(rgb) / fps
+    t = np.arange(0, duration, 1 / fps)
+    fig, axes = plt.subplots(3, 1, figsize=(14, 15))
+    colors = ["r", "g", "b"]
+    for i, sig in enumerate(rgb.T):
+        axes[0].plot(t, sig, c=colors[i], label=colors[i].capitalize())
+    axes[0].legend()
+    axes[0].set_title("RGB")
+
+    strongest_freq = freqs[np.argmax(pos_fft)]
+    heart_rate = 60 * strongest_freq  # beats per minute [BPM]
+    axes[1].plot(t, pos)
+    axes[1].set_title(f"POS signal, Heart Rate: {heart_rate:.2f} bpm")
+
+    axes[2].plot(freqs, pos_fft, "o-")
+    axes[2].set_title("Frequency magnitudes")
+
+    fig.savefig("temp/signals.jpg", bbox_inches="tight")
 
 
 def main():
@@ -186,30 +216,27 @@ def main():
     # exit()
     model = load_model()
     processing_fn = partial(extract_rgb_from_skin, model=model)
-    processing_fn = partial(extract_rgb_from_forehead, model=model)
+    # processing_fn = partial(extract_rgb_from_forehead, model=model)
 
     # filename = 0  # webcam
     result = process_video(processing_fn, filename=filename, start_frame=0, end_frame=-1)
     rgb = np.stack(result["rgb"])
+    frames = result["frame_mask"]
+    save_frames_to_video(frames, 30, "temp/frames_mask.mp4")
     np.save("temp/rgb.npy", rgb)
     rgb = np.load("temp/rgb.npy")
-    rgb_fig = plt.figure(figsize=(14, 5))
-    plt.plot(rgb)
-    rgb_fig.savefig("temp/rgb.jpg")
 
     fps = 30
     pos_extractor = POSExtractor(fps).to(DEVICE)
 
-    x = torch.from_numpy(rgb).unsqueeze(0).to(DEVICE).float()
-    pos = pos_extractor(x).squeeze().cpu().numpy()
+    rgb_input = torch.from_numpy(rgb).unsqueeze(0).to(DEVICE).float()
+    pos = pos_extractor(rgb_input).squeeze().cpu().numpy()
 
     b, a = signal.butter(1, [0.75 / fps * 2, 3 / fps * 2], btype="bandpass")
-    # pos = detrend(pos, 100)
     pos = signal.filtfilt(b, a, pos.astype(np.double))
 
-    pos_fig = plt.figure(figsize=(14, 5))
-    plt.plot(pos)
-    pos_fig.savefig("temp/POS.jpg")
+    freqs, pos_fft = get_signal_frequencies(pos, fps)
+    plot_signals(rgb, pos, freqs, pos_fft, fps)
 
 
 if __name__ == "__main__":
