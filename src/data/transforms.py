@@ -69,7 +69,7 @@ class CelebATransform:
                 new_h = int(new_w * aspect_ratio)
             else:
                 new_h = int(self.imgsz)
-                new_w = int(new_h * aspect_ratio)
+                new_w = int(new_h / aspect_ratio)
             _image = cv2.resize(image, (new_w, new_h))
 
             # CenterCrop

@@ -21,15 +21,15 @@ from src.model.module import Trainer, SegmentationModule
 from src.model.metrics.segmentation import SegmentationMetrics
 from src.model.utils import seed_everything
 
-from src.bin.celebA.config import (
+from src.bin.config import (
     IMGSZ,
     MEAN,
     STD,
     SEED,
     DS_PATH,
-    NUM_CLASSES,
+    N_CLASSES,
     BATCH_SIZE,
-    BATCHED_MODEL_INPUT_SIZE,
+    MODEL_INPUT_SIZE,
     CKPT_PATH,
     LOGS_PATH,
     LOG_EVERY_N_STEPS,
@@ -47,9 +47,9 @@ transform = CelebATransform(IMGSZ, MEAN, STD)
 
 
 def create_datamodule() -> DataModule:
-    train_ds = CelebAMaskDataset(str(DS_PATH), NUM_CLASSES, "train", transform.train)
-    val_ds = CelebAMaskDataset(str(DS_PATH), NUM_CLASSES, "val", transform.inference)
-    test_ds = CelebAMaskDataset(str(DS_PATH), NUM_CLASSES, "test", transform.inference)
+    train_ds = CelebAMaskDataset(str(DS_PATH), N_CLASSES, "train", transform.train)
+    val_ds = CelebAMaskDataset(str(DS_PATH), N_CLASSES, "val", transform.inference)
+    test_ds = CelebAMaskDataset(str(DS_PATH), N_CLASSES, "test", transform.inference)
     return DataModule(train_ds=train_ds, val_ds=val_ds, test_ds=test_ds, batch_size=BATCH_SIZE)
 
 
@@ -60,8 +60,8 @@ def create_module() -> SegmentationModule:
     )
 
     model = SegmentationModel(
-        net=PSPNet(num_classes=NUM_CLASSES, cls_dropout=0.5, backbone="resnet101"),
-        input_size=BATCHED_MODEL_INPUT_SIZE,
+        net=PSPNet(num_classes=N_CLASSES, cls_dropout=0.5, backbone="resnet101"),
+        input_size=MODEL_INPUT_SIZE,
         input_names=["images"],
         output_names=["masks", "class_probs"],
     )
@@ -74,7 +74,7 @@ def create_module() -> SegmentationModule:
     module = SegmentationModule(
         model=model,
         loss_fn=loss_fn,
-        metrics=SegmentationMetrics(NUM_CLASSES),
+        metrics=SegmentationMetrics(N_CLASSES),
         optimizers={"optim": optimizer},
         schedulers={"optim": scheduler},
     )
@@ -89,7 +89,7 @@ def create_callbacks(logger: TerminalLogger) -> list:
     callbacks = [
         MetricsPlotterCallback(str(logger.log_path / "epoch_metrics.jpg")),
         MetricsSaverCallback(str(logger.log_path / "epoch_metrics.yaml")),
-        ModelSummary(input_size=BATCHED_MODEL_INPUT_SIZE, depth=4, filepath=summary_filepath),
+        ModelSummary(input_size=MODEL_INPUT_SIZE, depth=4, filepath=summary_filepath),
         SaveModelCheckpoint(name="best", metric="mean_IoU", **ckpt_saver_params),
         SaveModelCheckpoint(name="last", last=True, top_k=0, **ckpt_saver_params),
         SegmentationExamplesPlotterCallback(
