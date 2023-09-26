@@ -32,6 +32,7 @@ from src.utils.image import (
 
 transform = CelebATransform(IMGSZ, MEAN, STD)
 
+
 CKPT_PATH = ROOT / "results/test/23-09-2023_07:54:35/checkpoints/last.pt"
 FPS = 30
 
@@ -258,6 +259,11 @@ def plot_signals(rgb: np.ndarray, pos: np.ndarray, fps: float, filename: str):
 
     axes[2].plot(freqs, pos_fft, "o-")
     axes[2].set_title("Frequency magnitudes")
+
+    axes[0].set_xlabel("Time [s]")
+    axes[1].set_xlabel("Time [s]")
+    axes[2].set_xlabel("Frequency [Hz]")
+    axes[2].set_ylabel("Magnitude")
 
     fig.savefig(filename, bbox_inches="tight")
 
