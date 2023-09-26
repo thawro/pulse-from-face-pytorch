@@ -38,5 +38,5 @@ https://github.com/thawro/pulse-from-face-pytorch/assets/50373360/f953ff21-2666-
 
 
 ## RGB and POS signals along with the frequency spectrum and estimated Heart Rate (HR). 
-![signals_from_skin](https://github.com/thawro/pulse-from-face-pytorch/assets/50373360/d20750a0-e228-466c-b4ab-25f7ca2188a9)
+![signals_from_skin](https://github.com/thawro/pulse-from-face-pytorch/assets/50373360/c97b0ff8-1da6-4499-903f-78a6689c6bc5)
 
