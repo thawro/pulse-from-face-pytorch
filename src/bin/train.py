@@ -14,7 +14,7 @@ from src.callbacks import (
     SegmentationExamplesPlotterCallback,
 )
 
-from src.model.architectures.psp_net import PSPNet
+from src.model.architectures.segmentation.psp_net import PSPNet
 from src.model.model.segmentation import SegmentationModel
 from src.model.loss import WeightedLoss, AuxiliarySegmentationLoss
 from src.model.module import Trainer, SegmentationModule

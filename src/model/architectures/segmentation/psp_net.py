@@ -1,5 +1,7 @@
 """Implementation of PSPNet (with dilated ResNet)
 https://arxiv.org/pdf/1612.01105.pdf
+
+Implementation of dilated ResNet-101 with deep supervision. Downsampling is changed to 8x
 """
 
 import math
@@ -11,10 +13,8 @@ from torch import Tensor, nn
 from torch.utils import model_zoo
 
 from src.model.architectures.helpers import ConvBnAct
+from .base import SegmentationNet
 
-"""
-    Implementation of dilated ResNet-101 with deep supervision. Downsampling is changed to 8x
-"""
 model_urls = {
     "resnet18": "https://download.pytorch.org/models/resnet18-5c106cde.pth",
     "resnet34": "https://download.pytorch.org/models/resnet34-333f7ec4.pth",
@@ -247,21 +247,6 @@ class PyramidPoolingModule(nn.Module):
         return self.relu(torch.cat(pooled_features, dim=1))
 
 
-class PSPUpsample(nn.Module):
-    def __init__(self, in_channels: int, out_channels: int):
-        super().__init__()
-        self.conv = nn.Sequential(
-            nn.Conv2d(in_channels, out_channels, 3, padding=1),
-            nn.BatchNorm2d(out_channels),
-            nn.PReLU(),
-        )
-
-    def forward(self, x: Tensor) -> Tensor:
-        h, w = (x.size(2), x.size(3))
-        upsampled = F.interpolate(x, size=(h * 2, w * 2), mode="bilinear")
-        return self.conv(upsampled)
-
-
 BACKBONE_3_4_CHANNELS = {
     "resnet18": [256, 512],
     "resnet34": [256, 512],
@@ -271,7 +256,7 @@ BACKBONE_3_4_CHANNELS = {
 }
 
 
-class PSPNet(nn.Module):
+class PSPNet(SegmentationNet):
     def __init__(
         self,
         num_classes: int,
@@ -281,9 +266,7 @@ class PSPNet(nn.Module):
         ] = "resnet101",
         cls_dropout: float = 0.5,
     ):
-        super().__init__()
-        self.num_classes = num_classes
-
+        super().__init__(num_classes)
         encoder = resnet(backbone, pretrained=True)
         self.init_conv_0 = nn.Sequential(encoder.conv1, encoder.bn1, encoder.relu, encoder.maxpool)
         self.encoder_1 = encoder.layer1
@@ -322,7 +305,5 @@ class PSPNet(nn.Module):
         out = self.pre_head_conv(out)
         out = self.dropout(out)
         seg_out = self.segmentation_head(out)
-        if self.num_classes == 1:
-            seg_out = seg_out.squeeze(dim=1)
         cls_out = self.classification_head(out_3)
         return seg_out, cls_out

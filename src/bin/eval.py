@@ -79,7 +79,7 @@ class POSExtractor(torch.nn.Module):
 
 def predict(frame: np.ndarray, model: SegmentationModel, labels: list[str]):
     input_frame, resize_size, crop_coords = transform.process(frame)
-    seg_mask, _ = model(input_frame.unsqueeze(0).to(DEVICE))
+    seg_mask = model.segment(input_frame.unsqueeze(0).to(DEVICE))
     input_frame = transform.inverse_preprocessing(input_frame)
 
     seg_mask = seg_mask.squeeze().argmax(0)

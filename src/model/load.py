@@ -1,6 +1,6 @@
 """Functions used to load model with trained weights"""
 from src.model.model.segmentation import SegmentationModel
-from src.model.architectures.psp_net import PSPNet
+from src.model.architectures.segmentation.psp_net import PSPNet
 import torch
 
 
