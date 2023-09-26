@@ -20,15 +20,23 @@ To extract rPPG signal from the face:
 
 # Pulse estimation
 1. Extract rPPG from video - after this step the R, G and B signals are present (signal length is equal to number of frames)
-2. Apply [Plane Orthogonal to the Skin (POS)](https://pure.tue.nl/ws/files/31563684/TBME_00467_2016_R1_preprint.pdf) algorithm to get POS signal from the RGB signals
-3. Run FFT for RGB channels of rPPG signals to find the strongest frequency (which corresponds to the Heart Rate)
-4. Calculate the Heart Rate using the strongest frequency: `HR = strongest_freq * 60`
+2. Filter out pixels belonging to the skin
+3. Apply [Plane Orthogonal to the Skin (POS)](https://pure.tue.nl/ws/files/31563684/TBME_00467_2016_R1_preprint.pdf) algorithm to get POS signal from the RGB signals
+4. Run FFT for RGB channels of rPPG signals to find the strongest frequency (which corresponds to the Heart Rate)
+5. Calculate the Heart Rate using the strongest frequency: `HR = strongest_freq * 60`
 
 # **Results**
 
-## The input video with skin mask predicted by the `PSPNet` model:
-https://github.com/thawro/pulse-from-face-pytorch/assets/50373360/e8312e1e-00b7-4867-82b3-01f2ea53f89b
+## Processing pipeline
+1. Raw frame
+2. Frame trasformed to match model input size
+3. Model output segmentation map (with all classes)
+4. Output segmentation map filtered to match `skin` and `nose` labels (`skin_mask`)
+5. Raw frame with pulse extracted for each pixel and masked with `skin_mask`
+
+https://github.com/thawro/pulse-from-face-pytorch/assets/50373360/f953ff21-2666-4818-83f1-a0195a4d8905
+
 
 ## RGB and POS signals along with the frequency spectrum and estimated Heart Rate (HR). 
-![signals](https://github.com/thawro/pulse-from-face-pytorch/assets/50373360/7a51c9ae-068f-4c4b-9a7e-c6cd4007e6ad)
+![signals_from_skin](https://github.com/thawro/pulse-from-face-pytorch/assets/50373360/d20750a0-e228-466c-b4ab-25f7ca2188a9)
 
