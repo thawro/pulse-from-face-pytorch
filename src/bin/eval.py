@@ -7,7 +7,7 @@ from functools import partial
 import matplotlib.pyplot as plt
 
 from src.model.model.segmentation import SegmentationModel
-from src.model.architectures.psp_net import PSPNet
+from src.model.load import load_model
 from src.data.transforms import CelebATransform
 from src.visualization.segmentation import colorize_mask
 from src.bin.config import IMGSZ, MEAN, STD, N_CLASSES, DEVICE, MODEL_INPUT_SIZE, PALETTE, LABELS
@@ -27,7 +27,6 @@ from src.utils.image import (
     add_labels_to_frames,
     RED,
     GREEN,
-    BLUE,
 )
 
 transform = CelebATransform(IMGSZ, MEAN, STD)
@@ -35,19 +34,6 @@ transform = CelebATransform(IMGSZ, MEAN, STD)
 
 CKPT_PATH = ROOT / "results/test/23-09-2023_07:54:35/checkpoints/last.pt"
 FPS = 30
-
-
-def load_model():
-    model = SegmentationModel(
-        net=PSPNet(num_classes=N_CLASSES, cls_dropout=0.5, backbone="resnet101"),
-        input_size=MODEL_INPUT_SIZE,
-        input_names=["images"],
-        output_names=["masks", "class_probs"],
-    )
-    ckpt = torch.load(CKPT_PATH, map_location=DEVICE)
-    ckpt = ckpt["module"]["model"]
-    model.load_state_dict(ckpt)
-    return model.to(DEVICE)
 
 
 class POSExtractor(torch.nn.Module):
@@ -273,7 +259,7 @@ def main():
     filename = "temp/input/video_2.MOV"
     # filename = 2  # webcam
 
-    model = load_model()
+    model = load_model(N_CLASSES, MODEL_INPUT_SIZE, CKPT_PATH, DEVICE)
     pos_extractor = POSExtractor(FPS).to(DEVICE)
 
     if mode == "skin":
