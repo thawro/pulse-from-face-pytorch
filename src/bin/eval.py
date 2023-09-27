@@ -12,7 +12,7 @@ from src.data.transforms import CelebATransform
 from src.visualization.segmentation import colorize_mask
 from src.bin.config import IMGSZ, MEAN, STD, N_CLASSES, DEVICE, MODEL_INPUT_SIZE, PALETTE, LABELS
 from src.utils.config import ROOT
-from src.utils.video import process_video, save_frames_to_video, get_video_size
+from src.utils.video import process_video, save_frames_to_video, get_video_params
 from src.utils.ops import (
     keep_largest_blob,
     avg_pool,
@@ -23,10 +23,12 @@ from src.utils.ops import (
 )
 from src.utils.image import (
     stack_frames_horizontally,
+    stack_frames_vertically,
     add_txt_to_image,
     add_labels_to_frames,
     RED,
     GREEN,
+    BLACK,
 )
 
 transform = CelebATransform(IMGSZ, MEAN, STD)
@@ -34,6 +36,48 @@ transform = CelebATransform(IMGSZ, MEAN, STD)
 
 CKPT_PATH = ROOT / "results/test/23-09-2023_07:54:35/checkpoints/last.pt"
 FPS = 30
+
+
+def filter_pos(pos: np.ndarray, fps: float):
+    sos = signal.cheby2(4, 10, [2 / 3, 4], "bandpass", output="sos", fs=fps)
+    return signal.sosfiltfilt(sos, pos)
+
+
+def plot_signals(rgb: np.ndarray, pos: np.ndarray, fps: float, filename: str):
+    def get_signal_frequencies(signal: np.ndarray, fs: float):
+        y_fft = np.fft.fft(signal)  # Original FFT
+        y_fft = y_fft[: round(len(signal) / 2)]  # First half ( pos freqs )
+        y_fft = np.abs(y_fft)  # Absolute value of magnitudes
+        y_fft = y_fft / max(y_fft)  # Normalized so max = 1
+        freq_x_axis = np.linspace(0, fs / 2, len(y_fft))
+        return freq_x_axis, y_fft
+
+    pos = filter_pos(pos, fps)
+
+    freqs, pos_fft = get_signal_frequencies(pos, fps)
+    duration = len(rgb) / fps
+    t = np.linspace(0, duration, len(rgb))
+    fig, axes = plt.subplots(3, 1, figsize=(14, 15))
+    colors = ["r", "g", "b"]
+    for i, sig in enumerate(rgb.T):
+        axes[0].plot(t, sig, c=colors[i], label=colors[i].capitalize())
+    axes[0].legend()
+    axes[0].set_title("RGB")
+
+    strongest_freq = freqs[np.argmax(pos_fft)]
+    heart_rate = 60 * strongest_freq  # beats per minute [BPM]
+    axes[1].plot(t, pos)
+    axes[1].set_title(f"POS signal, Heart Rate: {heart_rate:.2f} bpm")
+
+    axes[2].plot(freqs, pos_fft, "o-")
+    axes[2].set_title("Frequency magnitudes")
+
+    axes[0].set_xlabel("Time [s]")
+    axes[1].set_xlabel("Time [s]")
+    axes[2].set_xlabel("Frequency [Hz]")
+    axes[2].set_ylabel("Magnitude")
+
+    fig.savefig(filename, bbox_inches="tight")
 
 
 class POSExtractor(torch.nn.Module):
@@ -53,10 +97,11 @@ class POSExtractor(torch.nn.Module):
         all_rgbs = []
         for _rgb in rgbs:
             _rgb = _rgb.unfold(dimension=0, size=self.win_len, step=1)
-            _rgb = _rgb.permute(0, 2, 1)
             all_rgbs.append(_rgb)
-        all_rgbs = torch.stack(all_rgbs)
-        rgb = all_rgbs.flatten(0, 1)
+        all_rgbs = torch.stack(all_rgbs).permute(0, 1, 3, 2)
+        rgb = all_rgbs.squeeze(1)  # .flatten(0, 1)
+        if len(rgb.shape) == 4:
+            rgb = rgb.squeeze(0)
         fold_B, _, C = rgb.shape
         H = torch.zeros(B, N).to(DEVICE)
         Cn = rgb / rgb.mean(dim=1, keepdim=True)
@@ -68,13 +113,18 @@ class POSExtractor(torch.nn.Module):
 
         h = S[:, 0] + (std_0 / std_1).unsqueeze(1) * S[:, 1]
         h = h - h.mean(1, keepdim=True)
+        h = h.detach()
+
         i = 0
         for b in range(B):
-            for m in range(0, N - self.win_len):
-                n = m + self.win_len
-                H[b, m:n] += h[i]
-                i += 1
-        return H.detach()
+            if N == self.win_len:
+                H[b] = h[b]
+            else:
+                for m in range(0, N - self.win_len):
+                    n = m + self.win_len
+                    H[b, m:n] += h[i]
+                    i += 1
+        return H
 
 
 def predict(frame: np.ndarray, model: SegmentationModel, labels: list[str]):
@@ -175,7 +225,14 @@ def extract_rgb_from_box(
     return {"rgb": global_rgb, "pulse_extraction": pulse_extraction}, prev_frames
 
 
-def extract_rgb_from_skin(frame: np.ndarray, model: SegmentationModel, prev_frames: torch.Tensor):
+def extract_rgb_from_skin(
+    frame: np.ndarray,
+    model: SegmentationModel,
+    prev_frames: torch.Tensor,
+    pos_signal: torch.Tensor,
+    rgb_signal: torch.Tensor,
+    idx: int,
+):
     start_time = time.time()
     frame = avg_pool(frame, kernel=(4, 4))
     frame_h, frame_w = frame.shape[:2]
@@ -186,16 +243,32 @@ def extract_rgb_from_skin(frame: np.ndarray, model: SegmentationModel, prev_fram
     frame_mask = inverse_processing_mask(output_mask, crop_coords, resize_size, (frame_h, frame_w))
 
     skin_mask = frame_mask == 1
+    face_rgb = frame[skin_mask].mean(0)  # H x W x 3 -> 3
+    rgb_signal[idx] = torch.from_numpy(face_rgb)
 
-    global_rgb = frame[skin_mask].mean(0)  # H x W x 3 -> 3
+    prev_frames = prev_frames.roll(shifts=-1, dims=0)
+    prev_frames[-1] = convolve_gaussian_2d(frame, 27, 3, DEVICE)
 
-    prev_frames = prev_frames.roll(shifts=-1, dims=2)
-    prev_frames[..., -1] = convolve_gaussian_2d(frame[..., 1], 27, 3, DEVICE)
+    start_idx = idx - pos_extractor.win_len
+    if start_idx >= 0 and start_idx < len(pos_signal) - pos_extractor.win_len:
+        end_idx = start_idx + pos_extractor.win_len
+        face_rgb_input = rgb_signal[start_idx:end_idx].unsqueeze(0).to(DEVICE)
+        pos_window = pos_extractor(face_rgb_input).cpu().squeeze()
+        pos_signal[start_idx:end_idx] += pos_window
+        pos = pos_signal[:end_idx].cpu().numpy()
 
-    prev_skin_pixels = prev_frames[skin_mask]
-    prev_skin_pixels = minmax(prev_skin_pixels, dim=-1, keepdim=True, scaler=255)
-    last_frame_pixels = prev_skin_pixels[:, -1]
-    last_frame_pixels = last_frame_pixels.squeeze().cpu().numpy().astype(np.uint8)
+        pos = filter_pos(pos, FPS).copy()
+        pos = minmax(pos, dim=0, keepdim=True, scaler=1).numpy()
+        scaler = pos[start_idx]  # get value at start_idx since it is the proper POS approx
+        pt1 = (start_idx - 1, int(pos[start_idx - 1] * 255) + 1)
+        pt2 = (start_idx, int(pos[start_idx] * 255) + 1)
+        cv2.line(POS_CANVAS, pt1, pt2, GREEN, 1)
+    else:
+        scaler = 1
+    prev_skin_pixels = prev_frames[:, skin_mask]
+    prev_skin_pixels = minmax(prev_skin_pixels, dim=0, keepdim=True, scaler=255)
+    last_frame_pixels = prev_skin_pixels[0].mean(-1)  # [..., 1]  # .mean(-1)
+    last_frame_pixels = (last_frame_pixels * scaler).cpu().numpy().astype(np.uint8)
     last_frame_pixels = cv2.applyColorMap(last_frame_pixels, cv2.COLORMAP_JET).squeeze()
 
     pulse_mask = np.zeros((*skin_mask.shape, 3), dtype=np.uint8)
@@ -210,69 +283,54 @@ def extract_rgb_from_skin(frame: np.ndarray, model: SegmentationModel, prev_fram
     labels = ["Raw frame", "Model input", "Model output", "Skin", "Face pulse"]
     video_frames = add_labels_to_frames(video_frames, labels)
     pulse_extraction = stack_frames_horizontally(video_frames)
+
+    add_txt_to_image(POS_CANVAS, ["POS approximation"], loc="tc")
+    pulse_extraction = stack_frames_vertically([pulse_extraction, POS_CANVAS])
+
     duration_ms = (time.time() - start_time) * 1000
     add_txt_to_image(pulse_extraction, [f"FPS: {int(1000 / duration_ms)}"], loc="tc")
+
     cv2.imshow("Raw frame", cv2.cvtColor(pulse_extraction, cv2.COLOR_RGB2BGR))
-    return {"rgb": global_rgb, "pulse_extraction": pulse_extraction}, prev_frames
+    return (
+        {"rgb": face_rgb, "pulse_extraction": pulse_extraction},
+        {"prev_frames": prev_frames, "pos_signal": pos_signal, "rgb_signal": rgb_signal},
+    )
 
 
-def plot_signals(rgb: np.ndarray, pos: np.ndarray, fps: float, filename: str):
-    def get_signal_frequencies(signal: np.ndarray, fs: float):
-        y_fft = np.fft.fft(signal)  # Original FFT
-        y_fft = y_fft[: round(len(signal) / 2)]  # First half ( pos freqs )
-        y_fft = np.abs(y_fft)  # Absolute value of magnitudes
-        y_fft = y_fft / max(y_fft)  # Normalized so max = 1
-        freq_x_axis = np.linspace(0, fs / 2, len(y_fft))
-        return freq_x_axis, y_fft
-
-    sos = signal.cheby2(4, 10, [2 / 3, 4], "bandpass", output="sos", fs=fps)
-    pos = signal.sosfiltfilt(sos, pos)
-
-    freqs, pos_fft = get_signal_frequencies(pos, fps)
-    duration = len(rgb) / fps
-    t = np.linspace(0, duration, len(rgb))
-    fig, axes = plt.subplots(3, 1, figsize=(14, 15))
-    colors = ["r", "g", "b"]
-    for i, sig in enumerate(rgb.T):
-        axes[0].plot(t, sig, c=colors[i], label=colors[i].capitalize())
-    axes[0].legend()
-    axes[0].set_title("RGB")
-
-    strongest_freq = freqs[np.argmax(pos_fft)]
-    heart_rate = 60 * strongest_freq  # beats per minute [BPM]
-    axes[1].plot(t, pos)
-    axes[1].set_title(f"POS signal, Heart Rate: {heart_rate:.2f} bpm")
-
-    axes[2].plot(freqs, pos_fft, "o-")
-    axes[2].set_title("Frequency magnitudes")
-
-    axes[0].set_xlabel("Time [s]")
-    axes[1].set_xlabel("Time [s]")
-    axes[2].set_xlabel("Frequency [Hz]")
-    axes[2].set_ylabel("Magnitude")
-
-    fig.savefig(filename, bbox_inches="tight")
+pos_extractor = POSExtractor(FPS).to(DEVICE)
 
 
 def main():
     mode = "skin"  # skin or box
-    filename = "temp/input/video_2.MOV"
-    # filename = 2  # webcam
+    # filename = "temp/input/video_2.MOV"
+    filename = 2  # webcam
+    video_params = get_video_params(filename)
+    video_h = video_params["height"]
+    video_w = video_params["width"]
+    video_frame_count = video_params["frame_count"]
+
+    if video_frame_count < 0:
+        video_frame_count = 1000
+
+    global POS_CANVAS
+    POS_CANVAS = np.zeros((256 + 2, video_frame_count, 3))
 
     model = load_model(N_CLASSES, MODEL_INPUT_SIZE, CKPT_PATH, DEVICE)
-    pos_extractor = POSExtractor(FPS).to(DEVICE)
 
     if mode == "skin":
-        video_w, video_h = get_video_size(filename)
         h, w = video_h // 4, video_w // 4
         process_fn = partial(extract_rgb_from_skin, model=model)
+        prev_frames = (torch.zeros(pos_extractor.win_len, h, w, 3)).to(DEVICE)
+        pos_signal = torch.zeros(video_frame_count)
+        rgb_signal = torch.zeros(video_frame_count, 3)
     else:
         h, w = 220, 130
         process_fn = partial(extract_rgb_from_box, model=model, box_size=(h, w))
+        prev_frames = (torch.zeros(h, w, 90) + 0.5).to(DEVICE)
 
-    prev_frames = (torch.zeros(h, w, 90) + 0.5).to(DEVICE)
-
-    result = process_video(process_fn, prev_frames, filename, start_frame=0, end_frame=-1)
+    result = process_video(
+        process_fn, prev_frames, pos_signal, rgb_signal, filename, start_frame=0, end_frame=-1
+    )
     pulse_extraction = result["pulse_extraction"]
     save_frames_to_video(pulse_extraction, FPS, f"temp/pulse_extraction_from_{mode}.mp4")
 

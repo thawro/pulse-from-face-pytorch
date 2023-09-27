@@ -2,6 +2,7 @@ import numpy as np
 import cv2
 from typing import Literal
 
+BLACK = (0, 0, 0)
 RED = (255, 0, 0)
 GREEN = (0, 255, 0)
 BLUE = (0, 0, 255)
@@ -29,6 +30,27 @@ def stack_frames_horizontally(frames: list[np.ndarray], vspace: int = 10, hspace
             ymin = hspace
         img[ymin : ymin + h, xmin : xmin + w, :] = frame
         xmin = xmin + w + vspace
+    return img
+
+
+def stack_frames_vertically(frames: list[np.ndarray], vspace: int = 10, hspace: int = 10):
+    img_h = sum([img.shape[0] for img in frames]) + (len(frames) + 1) * hspace
+    img_w = max([img.shape[1] for img in frames]) + 2 * vspace
+    img = np.zeros((img_h, img_w, 3), dtype=np.uint8)
+
+    ymin = hspace
+    xmin = vspace
+
+    for frame in frames:
+        if len(frame.shape) == 2:
+            frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2RGB)
+        h, w = frame.shape[:2]
+        if w < img_w - 2 * vspace:
+            xmin = img_w // 2 - w // 2
+        else:
+            xmin = vspace
+        img[ymin : ymin + h, xmin : xmin + w, :] = frame
+        ymin = ymin + h + hspace
     return img
 
 
@@ -98,3 +120,12 @@ def add_labels_to_frames(
         )
         labeled_frames.append(labeled_image)
     return labeled_frames
+
+
+def plot_signal(signal: np.ndarray, w: int):
+    canvas = np.zeros((255 + 2, w, 3))
+    for i in range(1, len(signal)):
+        pt1 = (i - 1, signal[i - 1] + 1)
+        pt2 = (i, signal[i] + 1)
+        cv2.line(canvas, pt1, pt2, GREEN, 1)
+    return canvas

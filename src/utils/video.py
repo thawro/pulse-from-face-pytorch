@@ -35,18 +35,21 @@ def record_webcam_to_mp4(filename: str = "video.mp4"):
     cv2.destroyAllWindows()
 
 
-def get_video_size(filename: str) -> tuple[int, int]:
+def get_video_params(filename: str) -> dict[str, int | float]:
     cap = cv2.VideoCapture(filename)
     w = int(cap.get(3))
     h = int(cap.get(4))
+    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     cap.release()
     cv2.destroyAllWindows()
-    return w, h
+    return {"width": w, "height": h, "frame_count": frame_count}
 
 
 def process_video(
     processing_fn: Callable[[np.ndarray], dict[str, Any]],
     prev_frames: torch.Tensor,
+    pos_signal: torch.Tensor,
+    rgb_signal: torch.Tensor,
     filename: str | int = "video.mp4",
     start_frame: int = 0,
     end_frame: int = -1,
@@ -56,22 +59,23 @@ def process_video(
     if end_frame == -1:
         end_frame = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
+    out = {"prev_frames": prev_frames, "pos_signal": pos_signal, "rgb_signal": rgb_signal}
     results = defaultdict(lambda: [], {})
-    count = 0
+    idx = 0
     while True:
-        count += 1
+        idx += 1
         ret, frame = cap.read()
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         if verbose:
-            print(count)
-        if count < start_frame:
+            print(idx)
+        if idx < start_frame:
             continue
-        if count == end_frame:
+        if idx == end_frame:
             break
         if ret:
-            result, prev_frames = processing_fn(frame=frame_rgb, prev_frames=prev_frames)
-            for name, out in result.items():
-                results[name].append(out)
+            result, out = processing_fn(frame=frame_rgb, idx=idx, **out)
+            for name, r in result.items():
+                results[name].append(r)
             if cv2.waitKey(1) == 27:
                 break
     cap.release()

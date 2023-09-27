@@ -33,20 +33,28 @@ def gaussian_kernel_2d(kernel_size: int, sigma: float, n_channels: int = 1, devi
     kernel = (1 / (2 * math.pi * var)) * torch.exp(
         -torch.sum((xy_grid - mean) ** 2.0, dim=-1) / (2 * var)
     )
-    return (kernel / torch.sum(kernel)).to(device).repeat(n_channels, n_channels, 1, 1)
+    return (kernel / torch.sum(kernel)).to(device).repeat(n_channels, 1, 1, 1)
 
 
 def convolve_gaussian_2d(
     image: np.ndarray, kernel_size: int, sigma: float = 3, device: str = "cuda"
 ):
+    input_image = torch.from_numpy(image).to(device)
     if len(image.shape) == 2:
         n_channels = 1
+        input_image = input_image.unsqueeze(0)
+
     else:
         n_channels = image.shape[-1]
+        input_image = input_image.permute(2, 0, 1)
     kernel = gaussian_kernel_2d(kernel_size, sigma, n_channels=n_channels, device=device)
     padding = (kernel_size - 1) // 2
-    input_image = torch.from_numpy(image).to(device).unsqueeze(0).unsqueeze(0)
-    return F.conv2d(input_image, kernel, groups=1, padding=padding).squeeze()
+    input_image = input_image.unsqueeze(0)
+    out_image = F.conv2d(input_image, kernel, groups=n_channels, padding=padding).permute(
+        0, 2, 3, 1
+    )
+
+    return out_image.squeeze()
 
 
 def avg_pool(frame: np.ndarray, kernel: tuple[int, int] = (4, 4)):
@@ -57,6 +65,8 @@ def avg_pool(frame: np.ndarray, kernel: tuple[int, int] = (4, 4)):
 
 
 def minmax(x: torch.Tensor, dim: int, keepdim: bool, scaler: float):
+    if isinstance(x, np.ndarray):
+        x = torch.from_numpy(x)
     _min = torch.min(x, dim=dim, keepdim=keepdim).values
     _max = torch.max(x, dim=dim, keepdim=keepdim).values
     return (x - _min) / (_max - _min) * scaler
