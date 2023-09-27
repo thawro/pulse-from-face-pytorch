@@ -48,8 +48,6 @@ def get_video_params(filename: str) -> dict[str, int | float]:
 def process_video(
     processing_fn: Callable[[np.ndarray], dict[str, Any]],
     prev_frames: torch.Tensor,
-    pos_signal: torch.Tensor,
-    rgb_signal: torch.Tensor,
     filename: str | int = "video.mp4",
     start_frame: int = 0,
     end_frame: int = -1,
@@ -59,7 +57,6 @@ def process_video(
     if end_frame == -1:
         end_frame = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
-    out = {"prev_frames": prev_frames, "pos_signal": pos_signal, "rgb_signal": rgb_signal}
     results = defaultdict(lambda: [], {})
     idx = 0
     while True:
@@ -73,7 +70,7 @@ def process_video(
         if idx == end_frame:
             break
         if ret:
-            result, out = processing_fn(frame=frame_rgb, idx=idx, **out)
+            result, prev_frames = processing_fn(frame=frame_rgb, prev_frames=prev_frames, idx=idx)
             for name, r in result.items():
                 results[name].append(r)
             if cv2.waitKey(1) == 27:

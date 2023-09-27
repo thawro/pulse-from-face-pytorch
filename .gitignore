@@ -166,3 +166,4 @@ notebooks/
 *.MOV
 *.mp4
 temp/*
+evaluation/*
