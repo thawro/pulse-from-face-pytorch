@@ -34,9 +34,10 @@ To extract rPPG signal from the face:
 4. Output segmentation map filtered to match `skin` and `nose` labels (`skin_mask`)
 5. Raw frame with pulse extracted for each pixel and masked with `skin_mask`
 
-https://github.com/thawro/pulse-from-face-pytorch/assets/50373360/f953ff21-2666-4818-83f1-a0195a4d8905
+
+https://github.com/thawro/pulse-from-face-pytorch/assets/50373360/4294c712-c17c-48f9-bf3c-e726bd3bda8b
 
 
 ## RGB and POS signals along with the frequency spectrum and estimated Heart Rate (HR). 
-![signals_from_skin](https://github.com/thawro/pulse-from-face-pytorch/assets/50373360/c97b0ff8-1da6-4499-903f-78a6689c6bc5)
+![signals_from_skin_hand_good_light](https://github.com/thawro/pulse-from-face-pytorch/assets/50373360/868a46f1-3a2e-4226-85a3-ade711bd8a5d)
 
