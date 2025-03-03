@@ -2,7 +2,7 @@
 from .base import BaseModule
 from torch import Tensor
 from src.model.model.segmentation import SegmentationModel
-from src.model.loss.auxiliary import AuxiliarySegmentationLoss
+from src.model.loss.segmentation import AuxiliarySegmentationLoss
 from src.metrics.results import SegmentationResult
 from src.model.metrics.segmentation import SegmentationMetrics
 

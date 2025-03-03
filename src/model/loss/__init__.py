@@ -1,2 +1,2 @@
-from .auxiliary import AuxiliarySegmentationLoss
+from .segmentation import AuxiliarySegmentationLoss
 from .base import WeightedLoss

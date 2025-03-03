@@ -21,7 +21,7 @@ from src.model.module import Trainer, SegmentationModule
 from src.model.metrics.segmentation import SegmentationMetrics
 from src.model.utils import seed_everything
 
-from src.bin.config import (
+from src.bin.segmentation.config import (
     IMGSZ,
     MEAN,
     STD,

@@ -8,8 +8,17 @@ from src.model.model.segmentation import SegmentationModel
 from src.model.load import load_model
 from src.data.transforms import CelebATransform
 from src.visualization.segmentation import colorize_mask
-from src.bin.config import IMGSZ, MEAN, STD, N_CLASSES, DEVICE, MODEL_INPUT_SIZE, PALETTE, LABELS
-from src.bin.eval.utils import POSExtractor, plot_signals, filter_pos
+from src.bin.segmentation.config import (
+    IMGSZ,
+    MEAN,
+    STD,
+    N_CLASSES,
+    DEVICE,
+    MODEL_INPUT_SIZE,
+    PALETTE,
+    LABELS,
+)
+from src.bin.utils import POSExtractor, plot_signals, filter_pos
 from src.utils.config import ROOT
 from src.utils.video import process_video, save_frames_to_video, get_video_params
 from src.utils.ops import (
@@ -37,7 +46,9 @@ MODE = "segmentation"
 EVAL_RESULTS_PATH = ROOT / "evaluation" / MODE
 EVAL_RESULTS_PATH.mkdir(exist_ok=True, parents=True)
 
+VIDEO_IN_PATH = 0  # "evaluation/input/video_2.MOV"
 VIDEO_IN_PATH = "evaluation/input/video_2.MOV"
+
 VIDEO_OUT_PATH = str(EVAL_RESULTS_PATH / "pulse_extraction.mp4")
 SIGNALS_OUT_PATH = str(EVAL_RESULTS_PATH / "signals.jpg")
 
@@ -51,6 +62,8 @@ def predict(image: np.ndarray, model: SegmentationModel, labels: list[str]):
     output_mask = output_mask.cpu().numpy()
     seg_mask = seg_mask.cpu().numpy()
     output_mask = keep_largest_blob(output_mask)
+    # kernel = np.ones((11, 11), np.uint8)
+    # output_mask = cv2.morphologyEx(output_mask, cv2.MORPH_CLOSE, kernel)
     return seg_mask, output_mask, input_image, resize_size, crop_coords
 
 
@@ -82,6 +95,27 @@ def extract_rgb_from_segmentation(
 
     seg_mask, output_mask, input_frame, resize_size, crop_coords = predict(frame, model, labels)
     frame_mask = inverse_processing_mask(output_mask, crop_coords, resize_size, (frame_h, frame_w))
+
+    # TODO
+    contours, _ = cv2.findContours(
+        (frame_mask * 255).astype(np.uint8), cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE
+    )
+    max_contour = max(contours, key=cv2.contourArea)
+    cv2.imshow("Frame mask", (frame_mask * 255).astype(np.uint8))
+    # rect = cv2.minAreaRect(contours[0])
+    # face_rect_coords = cv2.boxPoints(rect).astype(np.int32)
+    x1, y1, w, h = cv2.boundingRect(max_contour)
+    x2 = x1 + w
+    y2 = y1 + h
+    face_rect_coords = [(x1, y1), (x2, y1), (x2, y2), (x1, y2)]
+
+    dst_h, dst_w = 500, 500
+    pts1 = np.float32(face_rect_coords)
+    pts2 = np.float32([[0, 0], [dst_w, 0], [dst_w, dst_h], [0, dst_h]])
+    M = cv2.getPerspectiveTransform(pts1, pts2)
+    face_rect = cv2.warpPerspective(frame.astype(np.uint8), M, (dst_w, dst_h))
+    cv2.imshow("Face rect", cv2.cvtColor(face_rect, cv2.COLOR_RGB2BGR))
+    # TODO
 
     skin_mask = frame_mask == 1
     face_rgb = frame[skin_mask].mean(0)  # H x W x 3 -> 3
