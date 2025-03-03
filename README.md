@@ -4,12 +4,16 @@ Steps to prepare the dataset:
 1. Download the `.zip` file from the [CelebAMask-HQ](https://github.com/switchablenorms/CelebAMask-HQ) repo (or use this link directly: [link](https://drive.google.com/file/d/1badu11NqxGf6qM3PTTooQDJvQbejgbTv/view?pli=1)
 2. Place the `CelebAMask-HQ.zip` file in the projects root directory
 3. Run data preparation script:
-`python src/bin/prepare_data.py`
+```bash
+python src/bin/segmentation/prepare_data.py
+```
 
 # Skin segmentation model
 The [PSPNet](https://arxiv.org/abs/1612.01105) model was used for skin segmentation task (trained from scratch on CeleAMask-HQ dataset).
 Run the following line to train the model (assuming that dataset is already prepared)
-`python src/bin/celebA/train.py`
+```bash
+python src/bin/segmentation/train.py
+```
 
 # rPPG signal extraction
 To extract rPPG signal from the face:
@@ -41,3 +45,9 @@ https://github.com/thawro/pulse-from-face-pytorch/assets/50373360/4294c712-c17c-
 ## RGB and POS signals along with the frequency spectrum and estimated Heart Rate (HR). 
 ![signals_from_skin_hand_good_light](https://github.com/thawro/pulse-from-face-pytorch/assets/50373360/868a46f1-3a2e-4226-85a3-ade711bd8a5d)
 
+
+# Evaluation
+
+```bash
+python src/bin/segmentation/eval_pulse.py
+```
